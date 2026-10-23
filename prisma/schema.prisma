@@ -1,0 +1,472 @@
+// MediCore Prisma schema
+// Learn more at: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------- ENUMS --------------------
+
+enum Role {
+  ADMIN
+  DOCTOR
+  NURSE
+  RECEPTIONIST
+  PHARMACIST
+}
+
+// -------------------- MODELS --------------------
+
+model Hospital {
+  id            String   @id @default(cuid())
+  name          String
+  type          String
+  yearEstablished Int?
+  licenseNumber String?
+  beds          Int?
+  departments   Int?
+
+  // Contact
+  address       String?
+  city          String?
+  state         String?
+  country       String?
+  phone         String?
+  email         String?
+  website       String?
+
+   // Relations
+  users         User[]
+  patients      Patient[]
+  appointments  Appointment[]
+  invoices      Invoice[]
+  wards         Ward[]
+  admissions    Admission[]
+drugs         Drug[]
+  prescriptions Prescription[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  fullName      String
+  phone         String?
+  role          Role     @default(ADMIN)
+  isActive      Boolean  @default(true)
+
+  // Relations
+  hospitalId    String
+  hospital      Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  patientsCreated  Patient[] @relation("PatientsCreated")
+  appointmentsAsDoctor  Appointment[] @relation("AppointmentsAsDoctor")
+  appointmentsCreated   Appointment[] @relation("AppointmentsCreated")
+  invoicesCreated       Invoice[] @relation("InvoicesCreated")
+  paymentsReceived      Payment[] @relation("PaymentsReceived")
+    admissionsCreated     Admission[] @relation("AdmissionsCreated")
+  admissionsDischarged  Admission[] @relation("AdmissionsDischarged")
+prescriptionsWritten  Prescription[] @relation("PrescriptionsWritten")
+  prescriptionsDispensed Prescription[] @relation("PrescriptionsDispensed")
+
+  // Audit
+  lastLoginAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([hospitalId])
+}
+// -------------------- PATIENTS --------------------
+
+model Patient {
+  id              String   @id @default(cuid())
+  patientCode     String   @unique  // e.g. PT-A1B2C3 — the ID patients know
+
+  // Basic info
+  firstName       String
+  lastName        String
+  dateOfBirth     DateTime
+  gender          String   // "Male" | "Female" | "Other"
+  phone           String
+  email           String?
+  address         String?
+
+  // Medical
+  bloodGroup      String?  // "A+", "O-", etc.
+genotype        String?
+  allergies       String?  // free text
+  notes           String?  @db.Text
+
+  // Emergency contact
+  emergencyContactName   String?
+  emergencyContactPhone  String?
+
+  // Relations
+  hospitalId      String
+  hospital        Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  createdById     String?
+  createdBy       User?    @relation("PatientsCreated", fields: [createdById], references: [id], onDelete: SetNull)
+
+    appointments    Appointment[]
+  invoices        Invoice[]
+    admissions      Admission[]
+prescriptions   Prescription[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([hospitalId])
+  @@index([patientCode])
+  @@index([lastName, firstName])
+}
+// -------------------- APPOINTMENTS --------------------
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Appointment {
+  id              String             @id @default(cuid())
+  appointmentCode String             @unique  // AP-XXXXXX
+
+  // Relations
+  patientId       String
+  patient         Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  doctorId        String
+  doctor          User               @relation("AppointmentsAsDoctor", fields: [doctorId], references: [id], onDelete: Restrict)
+
+  hospitalId      String
+  hospital        Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  createdById     String?
+  createdBy       User?              @relation("AppointmentsCreated", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Appointment details
+  department      String
+  scheduledAt     DateTime
+  duration        Int                @default(30)  // minutes
+  reason          String?
+  notes           String?            @db.Text
+  status          AppointmentStatus  @default(SCHEDULED)
+
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([hospitalId])
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([scheduledAt])
+  @@index([status])
+}
+// -------------------- BILLING --------------------
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  OTHER
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  invoiceNo     String        @unique   // INV-XXXXXX
+
+  patientId     String
+  patient       Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  hospitalId    String
+  hospital      Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  createdById   String?
+  createdBy     User?         @relation("InvoicesCreated", fields: [createdById], references: [id], onDelete: SetNull)
+
+  status        InvoiceStatus @default(UNPAID)
+  totalAmount   Decimal       @db.Decimal(10, 2) @default(0)
+
+  dueDate       DateTime?
+  notes         String?       @db.Text
+
+  items         InvoiceItem[]
+  payments      Payment[]
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([hospitalId])
+  @@index([patientId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model InvoiceItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  description String                          // "Consultation", "Lab Test — CBC", etc.
+  category    String                          // CONSULTATION, TEST, ADMISSION, PHARMACY, OTHER
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  amount      Decimal  @db.Decimal(10, 2)     // quantity × unitPrice (stored, not computed)
+
+  createdAt   DateTime @default(now())
+
+  @@index([invoiceId])
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  amount      Decimal       @db.Decimal(10, 2)
+  method      PaymentMethod @default(CASH)
+  reference   String?                            // e.g. card transaction ID
+  notes       String?
+
+  receivedById String?
+  receivedBy   User?        @relation("PaymentsReceived", fields: [receivedById], references: [id], onDelete: SetNull)
+
+  paidAt      DateTime      @default(now())
+  createdAt   DateTime      @default(now())
+
+  @@index([invoiceId])
+  @@index([paidAt])
+}
+// -------------------- WARDS & BEDS --------------------
+
+enum BedStatus {
+  AVAILABLE
+  OCCUPIED
+  MAINTENANCE
+}
+
+enum AdmissionStatus {
+  ACTIVE
+  DISCHARGED
+  TRANSFERRED
+}
+
+model Ward {
+  id          String   @id @default(cuid())
+  name        String                            // "General Ward A", "ICU", "Maternity"
+  floor       String?                           // "Ground floor", "3rd floor"
+  capacity    Int      @default(0)              // Number of beds (kept in sync via API)
+
+  hospitalId  String
+  hospital    Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  beds        Bed[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([hospitalId])
+}
+
+model Bed {
+  id          String    @id @default(cuid())
+  bedNumber   String                            // "A-01", "ICU-3"
+
+  wardId      String
+  ward        Ward      @relation(fields: [wardId], references: [id], onDelete: Cascade)
+
+  status      BedStatus @default(AVAILABLE)
+
+  admissions  Admission[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([wardId, bedNumber])                 // No duplicate bed numbers within a ward
+  @@index([wardId])
+  @@index([status])
+}
+
+model Admission {
+  id             String          @id @default(cuid())
+  admissionNo    String          @unique       // ADM-XXXXXX
+
+  patientId      String
+  patient        Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  bedId          String
+  bed            Bed             @relation(fields: [bedId], references: [id], onDelete: Restrict)
+
+  hospitalId     String
+  hospital       Hospital        @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  admittedById   String?
+  admittedBy     User?           @relation("AdmissionsCreated", fields: [admittedById], references: [id], onDelete: SetNull)
+
+  dischargedById String?
+  dischargedBy   User?           @relation("AdmissionsDischarged", fields: [dischargedById], references: [id], onDelete: SetNull)
+
+  reason         String?                         // "Post-surgery recovery", "Observation", etc.
+  notes          String?         @db.Text
+
+  admittedAt     DateTime        @default(now())
+  expectedDischargeAt DateTime?
+  dischargedAt   DateTime?
+
+  status         AdmissionStatus @default(ACTIVE)
+
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([hospitalId])
+  @@index([patientId])
+  @@index([bedId])
+  @@index([status])
+}
+// -------------------- PHARMACY --------------------
+
+enum DrugForm {
+  TABLET
+  CAPSULE
+  SYRUP
+  INJECTION
+  CREAM
+  OINTMENT
+  DROPS
+  INHALER
+  SUPPOSITORY
+  OTHER
+}
+
+enum PrescriptionStatus {
+  PENDING
+  PARTIALLY_DISPENSED
+  DISPENSED
+  CANCELLED
+}
+
+model Drug {
+  id            String    @id @default(cuid())
+  name          String                            // brand name, e.g. "Panadol"
+  genericName   String?                           // e.g. "Paracetamol"
+  form          DrugForm  @default(TABLET)
+  strength      String?                           // "500mg", "5mg/ml"
+
+  category      String?                           // "Analgesic", "Antibiotic", etc.
+  manufacturer  String?
+
+  // Pricing
+  sellingPrice  Decimal   @db.Decimal(10, 2) @default(0)   // what patients pay per unit
+  costPrice     Decimal   @db.Decimal(10, 2) @default(0)   // what we paid per unit
+
+  // Inventory threshold
+  reorderLevel  Int       @default(10)            // alert when total stock falls below
+
+  description   String?   @db.Text
+
+  hospitalId    String
+  hospital      Hospital  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  batches       DrugBatch[]
+  prescriptionItems PrescriptionItem[]
+
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([hospitalId])
+  @@index([name])
+  @@index([category])
+}
+
+model DrugBatch {
+  id            String   @id @default(cuid())
+  drugId        String
+  drug          Drug     @relation(fields: [drugId], references: [id], onDelete: Cascade)
+
+  batchNumber   String                            // supplier's batch/lot number
+  quantity      Int                               // remaining quantity in this batch
+  initialQty    Int                               // quantity when the batch was received
+
+  expiryDate    DateTime                          // non-negotiable — required for safety
+  receivedAt    DateTime @default(now())
+
+  supplierName  String?
+  notes         String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([drugId])
+  @@index([expiryDate])
+}
+
+model Prescription {
+  id             String              @id @default(cuid())
+  prescriptionNo String              @unique  // RX-XXXXXX
+
+  patientId      String
+  patient        Patient             @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  doctorId       String
+  doctor         User                @relation("PrescriptionsWritten", fields: [doctorId], references: [id], onDelete: Restrict)
+
+  hospitalId     String
+  hospital       Hospital            @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  status         PrescriptionStatus  @default(PENDING)
+
+  notes          String?             @db.Text
+  diagnosis      String?             // brief diagnosis or indication
+
+  dispensedById  String?
+  dispensedBy    User?               @relation("PrescriptionsDispensed", fields: [dispensedById], references: [id], onDelete: SetNull)
+  dispensedAt    DateTime?
+
+  items          PrescriptionItem[]
+
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([hospitalId])
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([status])
+}
+
+model PrescriptionItem {
+  id               String       @id @default(cuid())
+  prescriptionId   String
+  prescription     Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+
+  drugId           String
+  drug             Drug         @relation(fields: [drugId], references: [id], onDelete: Restrict)
+
+  dosage           String                           // "1 tablet", "5ml"
+  frequency        String                           // "3 times daily", "every 8 hours"
+  duration         String                           // "5 days", "2 weeks"
+  quantity         Int                              // total units to dispense
+
+  instructions     String?                          // "take after meals"
+
+  dispensedQty     Int          @default(0)         // how much was actually dispensed
+
+  createdAt        DateTime     @default(now())
+
+  @@index([prescriptionId])
+  @@index([drugId])
+}

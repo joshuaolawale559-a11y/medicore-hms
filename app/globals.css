@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  /* MediCore brand palette */
+  --color-brand-cyan: #C5F4FA;
+  --color-brand-cyan-light: #D2F7FF;
+  --color-brand-cyan-bright: #A5E9F5;
+  --color-brand-cyan-deep: #7DD3E8;
+  --color-brand-sky: #9DD1FF;
+  --color-brand-accent: #4AA9E8;
+  --color-brand-navy: #01233F;
+  --color-brand-success: #10B981;
+}
+
+body {
+  background: #ffffff;
+  color: #01233F;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
